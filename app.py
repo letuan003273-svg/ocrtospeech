@@ -1,67 +1,116 @@
 import streamlit as st
 import google.generativeai as genai
 from PIL import Image
+from gtts import gTTS
+import io
 
-# --- Cấu hình trang ---
-st.set_page_config(page_title="VisionVoice Clone", page_icon="✨")
+# --- 1. Cấu hình trang (Layout Wide để chia 2 cột) ---
+st.set_page_config(page_title="VisionVoice", page_icon="✨", layout="wide")
 
-# --- Cấu hình API Key ---
+# --- 2. Cấu hình API Key ---
 try:
     if "GOOGLE_API_KEY" in st.secrets:
         genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
     else:
-        st.error("Chưa tìm thấy API Key.")
+        st.error("⚠️ Chưa tìm thấy API Key trong Secrets.")
         st.stop()
 except Exception as e:
     st.error(f"Lỗi cấu hình: {e}")
 
-# --- Tiêu đề và Mô tả ---
-st.title("✨ VisionVoice")
-st.write("Upload an image, or type text to listen with lifelike AI speech.")
+# --- 3. CSS Tùy chỉnh để giống giao diện Card (Tùy chọn) ---
+st.markdown("""
+<style>
+    .stTextArea textarea {
+        background-color: #f0f2f6;
+        border-radius: 10px;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# --- Tạo khung giao diện chính ---
-# Sử dụng container để đóng gói giao diện
-with st.container():
-    # 1. Tạo nút chuyển đổi (Toggle) giữa File và Text
-    option = st.radio(
-        "Source",
-        ["File", "Text"],
-        horizontal=True, # Giúp nút nằm ngang giống trong ảnh
-        label_visibility="visible"
-    )
+# --- 4. Khởi tạo Session State (Để lưu văn bản sau khi AI quét xong) ---
+if 'extracted_text' not in st.session_state:
+    st.session_state['extracted_text'] = ""
 
-    st.divider() # Đường kẻ ngang
+# --- 5. Header ---
+st.markdown("<h1 style='text-align: center;'>✨ VisionVoice</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center;'>Upload an image to extract text and listen with AI speech.</p>", unsafe_allow_html=True)
+st.write("") # Khoảng trắng
 
-    # 2. Xử lý trường hợp chọn "File"
-    if option == "File":
-        uploaded_file = st.file_uploader(
-            "Click to upload", 
-            type=["jpg", "png", "jpeg"], 
-            help="Upload ảnh để AI phân tích"
-        )
+# --- 6. Giao diện chính (Chia 2 cột) ---
+col1, col2 = st.columns(2, gap="large")
+
+# === CỘT TRÁI: INPUT (SOURCE) ===
+with col1:
+    st.subheader("🖼️ Source")
+    
+    # Tab chọn File hoặc Text (Giả lập bằng Radio)
+    source_type = st.radio("Chọn nguồn:", ["File Upload", "Nhập tay"], horizontal=True, label_visibility="collapsed")
+    
+    if source_type == "File Upload":
+        # Khung upload ảnh
+        uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
         
-        if uploaded_file is not None:
-            # Hiển thị ảnh vừa upload
+        if uploaded_file:
+            # Hiển thị ảnh
             image = Image.open(uploaded_file)
-            st.image(image, caption="Ảnh đã tải lên", use_column_width=True)
+            st.image(image, caption="Ảnh gốc", use_column_width=True)
             
-            # Nút bấm để phân tích
-            if st.button("Phân tích ảnh này"):
-                with st.spinner("Đang suy nghĩ..."):
+            # Nút Quét chữ (OCR)
+            if st.button("🔍 Trích xuất văn bản (OCR)", type="primary", use_container_width=True):
+                with st.spinner("Gemini đang đọc ảnh..."):
                     try:
                         model = genai.GenerativeModel('gemini-1.5-flash')
-                        response = model.generate_content(["Mô tả chi tiết bức ảnh này bằng tiếng Việt.", image])
-                        st.success("Kết quả phân tích:")
-                        st.write(response.text)
+                        # Prompt yêu cầu chỉ trích xuất chữ
+                        response = model.generate_content(["Hãy trích xuất toàn bộ văn bản có trong bức ảnh này. Chỉ trả về nội dung văn bản, không thêm lời bình luận.", image])
+                        st.session_state['extracted_text'] = response.text
+                        st.rerun() # Tải lại trang để cập nhật cột bên phải
                     except Exception as e:
                         st.error(f"Lỗi: {e}")
-
-    # 3. Xử lý trường hợp chọn "Text"
     else:
-        text_input = st.text_area("Nhập văn bản của bạn vào đây...", height=150)
-        if st.button("Gửi văn bản"):
-            if text_input:
-                 with st.spinner("Đang xử lý..."):
-                    model = genai.GenerativeModel('gemini-1.5-flash')
-                    response = model.generate_content(text_input)
-                    st.write(response.text)
+        st.info("Chuyển sang chế độ nhập tay bên cột phải ->")
+
+# === CỘT PHẢI: OUTPUT (CONTENT & TTS) ===
+with col2:
+    st.subheader("📝 Content")
+    
+    # Ô hiển thị văn bản (Cho phép sửa)
+    text_content = st.text_area(
+        "Nội dung văn bản:",
+        value=st.session_state['extracted_text'],
+        height=300,
+        placeholder="Văn bản được trích xuất sẽ hiện ở đây...",
+        label_visibility="collapsed"
+    )
+    
+    # Cập nhật lại session state nếu người dùng sửa bằng tay
+    if text_content != st.session_state['extracted_text']:
+         st.session_state['extracted_text'] = text_content
+
+    st.divider()
+    
+    # Khu vực điều khiển giọng nói
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        # Chọn ngôn ngữ đọc
+        lang_option = st.selectbox("Giọng đọc", ["Tiếng Việt (vi)", "English (en)", "Korean (ko)", "Japanese (ja)"])
+        lang_code = lang_option.split("(")[1].replace(")", "") # Lấy mã 'vi', 'en'...
+    
+    with c2:
+        st.write("") # Căn chỉnh lề
+        st.write("") 
+        if st.button("🔊 Read Aloud (Đọc ngay)", use_container_width=True):
+            if text_content.strip():
+                try:
+                    # Sử dụng gTTS để tạo file âm thanh
+                    tts = gTTS(text=text_content, lang=lang_code)
+                    
+                    # Lưu vào bộ nhớ đệm thay vì lưu file cứng
+                    sound_file = io.BytesIO()
+                    tts.write_to_fp(sound_file)
+                    
+                    # Phát âm thanh
+                    st.audio(sound_file, format='audio/mp3')
+                except Exception as e:
+                    st.error(f"Lỗi tạo giọng nói: {e}")
+            else:
+                st.warning("Chưa có nội dung để đọc!")
