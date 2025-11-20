@@ -1,38 +1,38 @@
 import streamlit as st
 import google.generativeai as genai
 from PIL import Image
-import edge_tts
-import asyncio
-import tempfile # Để tạo file tạm thời
+from elevenlabs.client import ElevenLabs
+from elevenlabs import VoiceSettings
 
 # --- 1. Cấu hình trang ---
-st.set_page_config(page_title="VisionVoice Pro", page_icon="🎙️", layout="wide")
+st.set_page_config(page_title="VisionVoice Pro (ElevenLabs)", page_icon="💎", layout="wide")
 
-# --- 2. Cấu hình API Key ---
+# --- 2. Kiểm tra và lấy API Key từ Secrets ---
 try:
+    # Key Google
     if "GOOGLE_API_KEY" in st.secrets:
         genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
     else:
-        st.error("⚠️ Chưa tìm thấy API Key.")
+        st.error("⚠️ Thiếu GOOGLE_API_KEY.")
         st.stop()
+        
+    # Key ElevenLabs
+    if "ELEVENLABS_API_KEY" in st.secrets:
+        elevenlabs_client = ElevenLabs(api_key=st.secrets["ELEVENLABS_API_KEY"])
+    else:
+        st.error("⚠️ Thiếu ELEVENLABS_API_KEY.")
+        st.stop()
+
 except Exception as e:
-    st.error(f"Lỗi cấu hình: {e}")
+    st.error(f"Lỗi cấu hình Secrets: {e}")
 
-# --- 3. Hàm xử lý giọng đọc Edge-TTS (MỚI) ---
-async def text_to_speech_edge(text, voice_name):
-    communicate = edge_tts.Communicate(text, voice_name)
-    # Tạo file tạm trong bộ nhớ để lưu âm thanh
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
-        await communicate.save(tmp_file.name)
-        return tmp_file.name
-
-# --- 4. Session State ---
+# --- 3. Session State ---
 if 'extracted_text' not in st.session_state:
     st.session_state['extracted_text'] = ""
 
-# --- 5. Giao diện ---
-st.title("🎙️ VisionVoice Pro")
-st.caption("Sử dụng Gemini 1.5 Flash & Giọng đọc Neural siêu thực")
+# --- 4. Giao diện ---
+st.title("💎 VisionVoice Pro")
+st.caption("Powered by Gemini 1.5 & ElevenLabs (Giọng đọc AI cao cấp)")
 
 col1, col2 = st.columns(2, gap="large")
 
@@ -46,53 +46,62 @@ with col1:
         st.image(image, caption="Ảnh gốc", use_column_width=True)
         
         if st.button("🔍 Quét văn bản (OCR)", type="primary", use_container_width=True):
-            with st.spinner("Đang đọc ảnh..."):
+            with st.spinner("Gemini đang đọc ảnh..."):
                 try:
                     model = genai.GenerativeModel('gemini-2.5-flash')
-                    response = model.generate_content(["Trích xuất nguyên văn nội dung văn bản trong ảnh này.", image])
+                    response = model.generate_content(["Trích xuất toàn bộ nội dung văn bản trong ảnh này. Chỉ trả về văn bản.", image])
                     st.session_state['extracted_text'] = response.text
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Lỗi: {e}")
+                    st.error(f"Lỗi OCR: {e}")
 
 # === CỘT PHẢI: OUTPUT ===
 with col2:
-    st.subheader("📝 Văn bản & Giọng nói")
+    st.subheader("📝 & 🔊 ElevenLabs TTS")
     
     text_content = st.text_area(
         "Nội dung:",
         value=st.session_state['extracted_text'],
-        height=300
+        height=250
     )
     
-    # Cập nhật lại nếu sửa tay
     if text_content != st.session_state['extracted_text']:
          st.session_state['extracted_text'] = text_content
 
     st.divider()
     
-    # Chọn giọng đọc (Các giọng xịn của Microsoft)
+    # Cấu hình giọng đọc ElevenLabs
+    # Bạn có thể thêm Voice ID khác lấy từ trang ElevenLabs
     voice_options = {
-        "Tiếng Việt - Hoài My (Nữ - Nhẹ nhàng)": "vi-VN-HoaiMyNeural",
-        "Tiếng Việt - Nam Minh (Nam - Trầm ấm)": "vi-VN-NamMinhNeural",
-        "Tiếng Anh - Aria (Nữ)": "en-US-AriaNeural",
-        "Tiếng Anh - Christopher (Nam)": "en-US-ChristopherNeural"
+        "Rachel (Nữ - Tiếng Anh chuẩn)": "21m00Tcm4TlvDq8ikWAM",
+        "Clyde (Nam - Trầm ấm)": "2EiwWnXFnvU5JabPnv8n",
+        "Mimi (Nữ - Nhí nhảnh)": "ZrHiDhxje0jIeF18mMVI",
+        "Fin (Nam - Mạnh mẽ)": "D38z5RcWu1voky8WS1ja"
     }
     
-    selected_voice_label = st.selectbox("Chọn giọng đọc:", list(voice_options.keys()))
-    selected_voice_code = voice_options[selected_voice_label]
+    st.info("💡 Lưu ý: ElevenLabs Free giới hạn 10.000 ký tự/tháng.")
+    
+    selected_voice_name = st.selectbox("Chọn giọng (Voice ID):", list(voice_options.keys()))
+    selected_voice_id = voice_options[selected_voice_name]
 
-    if st.button("🔊 Đọc Ngay (Neural Voice)", use_container_width=True):
+    if st.button("🔊 Đọc bằng ElevenLabs", type="secondary", use_container_width=True):
         if text_content.strip():
-            with st.spinner("Đang tạo giọng nói (Mất khoảng 2-3 giây)..."):
+            with st.spinner("Đang kết nối máy chủ ElevenLabs (Xin chờ)..."):
                 try:
-                    # Chạy hàm bất đồng bộ (async)
-                    audio_file_path = asyncio.run(text_to_speech_edge(text_content, selected_voice_code))
+                    # Gọi API ElevenLabs
+                    # model_id="eleven_multilingual_v2" là BẮT BUỘC để đọc tiếng Việt
+                    audio_stream = elevenlabs_client.generate(
+                        text=text_content,
+                        voice=selected_voice_id,
+                        model="eleven_multilingual_v2"
+                    )
                     
-                    # Phát âm thanh
-                    st.audio(audio_file_path, format='audio/mp3')
+                    # Phát âm thanh trực tiếp (Streamlit tự xử lý byte stream)
+                    st.audio(audio_stream, format="audio/mp3")
                     st.success("Đã tạo xong!")
+                    
                 except Exception as e:
-                    st.error(f"Lỗi giọng nói: {e}")
+                    st.error(f"Lỗi ElevenLabs: {e}")
+                    st.warning("Gợi ý: Kiểm tra xem tài khoản ElevenLabs của bạn còn 'quota' (số lượng ký tự) miễn phí không.")
         else:
             st.warning("Chưa có nội dung để đọc!")
