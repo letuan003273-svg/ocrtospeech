@@ -1,0 +1,5 @@
+{
+  "name": "VisionVoice - OCR to Speech",
+  "description": "Extract text from images using Gemini Vision and convert it to lifelike speech using Gemini TTS.",
+  "requestFramePermissions": []
+}
