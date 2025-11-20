@@ -59,7 +59,7 @@ with col1:
             if st.button("🔍 Trích xuất văn bản (OCR)", type="primary", use_container_width=True):
                 with st.spinner("Gemini đang đọc ảnh..."):
                     try:
-                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        model = genai.GenerativeModel('gemini-2.5-flash')
                         # Prompt yêu cầu chỉ trích xuất chữ
                         response = model.generate_content(["Hãy trích xuất toàn bộ văn bản có trong bức ảnh này. Chỉ trả về nội dung văn bản, không thêm lời bình luận.", image])
                         st.session_state['extracted_text'] = response.text
