@@ -1,116 +1,98 @@
 import streamlit as st
 import google.generativeai as genai
 from PIL import Image
-from gtts import gTTS
-import io
+import edge_tts
+import asyncio
+import tempfile # Để tạo file tạm thời
 
-# --- 1. Cấu hình trang (Layout Wide để chia 2 cột) ---
-st.set_page_config(page_title="VisionVoice", page_icon="✨", layout="wide")
+# --- 1. Cấu hình trang ---
+st.set_page_config(page_title="VisionVoice Pro", page_icon="🎙️", layout="wide")
 
 # --- 2. Cấu hình API Key ---
 try:
     if "GOOGLE_API_KEY" in st.secrets:
         genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
     else:
-        st.error("⚠️ Chưa tìm thấy API Key trong Secrets.")
+        st.error("⚠️ Chưa tìm thấy API Key.")
         st.stop()
 except Exception as e:
     st.error(f"Lỗi cấu hình: {e}")
 
-# --- 3. CSS Tùy chỉnh để giống giao diện Card (Tùy chọn) ---
-st.markdown("""
-<style>
-    .stTextArea textarea {
-        background-color: #f0f2f6;
-        border-radius: 10px;
-    }
-</style>
-""", unsafe_allow_html=True)
+# --- 3. Hàm xử lý giọng đọc Edge-TTS (MỚI) ---
+async def text_to_speech_edge(text, voice_name):
+    communicate = edge_tts.Communicate(text, voice_name)
+    # Tạo file tạm trong bộ nhớ để lưu âm thanh
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
+        await communicate.save(tmp_file.name)
+        return tmp_file.name
 
-# --- 4. Khởi tạo Session State (Để lưu văn bản sau khi AI quét xong) ---
+# --- 4. Session State ---
 if 'extracted_text' not in st.session_state:
     st.session_state['extracted_text'] = ""
 
-# --- 5. Header ---
-st.markdown("<h1 style='text-align: center;'>✨ VisionVoice</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center;'>Upload an image to extract text and listen with AI speech.</p>", unsafe_allow_html=True)
-st.write("") # Khoảng trắng
+# --- 5. Giao diện ---
+st.title("🎙️ VisionVoice Pro")
+st.caption("Sử dụng Gemini 1.5 Flash & Giọng đọc Neural siêu thực")
 
-# --- 6. Giao diện chính (Chia 2 cột) ---
 col1, col2 = st.columns(2, gap="large")
 
-# === CỘT TRÁI: INPUT (SOURCE) ===
+# === CỘT TRÁI: INPUT ===
 with col1:
-    st.subheader("🖼️ Source")
+    st.subheader("🖼️ Hình ảnh")
+    uploaded_file = st.file_uploader("Tải ảnh lên", type=["jpg", "png", "jpeg"])
     
-    # Tab chọn File hoặc Text (Giả lập bằng Radio)
-    source_type = st.radio("Chọn nguồn:", ["File Upload", "Nhập tay"], horizontal=True, label_visibility="collapsed")
-    
-    if source_type == "File Upload":
-        # Khung upload ảnh
-        uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
+    if uploaded_file:
+        image = Image.open(uploaded_file)
+        st.image(image, caption="Ảnh gốc", use_column_width=True)
         
-        if uploaded_file:
-            # Hiển thị ảnh
-            image = Image.open(uploaded_file)
-            st.image(image, caption="Ảnh gốc", use_column_width=True)
-            
-            # Nút Quét chữ (OCR)
-            if st.button("🔍 Trích xuất văn bản (OCR)", type="primary", use_container_width=True):
-                with st.spinner("Gemini đang đọc ảnh..."):
-                    try:
-                        model = genai.GenerativeModel('gemini-2.5-flash')
-                        # Prompt yêu cầu chỉ trích xuất chữ
-                        response = model.generate_content(["Hãy trích xuất toàn bộ văn bản có trong bức ảnh này. Chỉ trả về nội dung văn bản, không thêm lời bình luận.", image])
-                        st.session_state['extracted_text'] = response.text
-                        st.rerun() # Tải lại trang để cập nhật cột bên phải
-                    except Exception as e:
-                        st.error(f"Lỗi: {e}")
-    else:
-        st.info("Chuyển sang chế độ nhập tay bên cột phải ->")
+        if st.button("🔍 Quét văn bản (OCR)", type="primary", use_container_width=True):
+            with st.spinner("Đang đọc ảnh..."):
+                try:
+                    model = genai.GenerativeModel('gemini-2.5-flash')
+                    response = model.generate_content(["Trích xuất nguyên văn nội dung văn bản trong ảnh này.", image])
+                    st.session_state['extracted_text'] = response.text
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Lỗi: {e}")
 
-# === CỘT PHẢI: OUTPUT (CONTENT & TTS) ===
+# === CỘT PHẢI: OUTPUT ===
 with col2:
-    st.subheader("📝 Content")
+    st.subheader("📝 Văn bản & Giọng nói")
     
-    # Ô hiển thị văn bản (Cho phép sửa)
     text_content = st.text_area(
-        "Nội dung văn bản:",
+        "Nội dung:",
         value=st.session_state['extracted_text'],
-        height=300,
-        placeholder="Văn bản được trích xuất sẽ hiện ở đây...",
-        label_visibility="collapsed"
+        height=300
     )
     
-    # Cập nhật lại session state nếu người dùng sửa bằng tay
+    # Cập nhật lại nếu sửa tay
     if text_content != st.session_state['extracted_text']:
          st.session_state['extracted_text'] = text_content
 
     st.divider()
     
-    # Khu vực điều khiển giọng nói
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        # Chọn ngôn ngữ đọc
-        lang_option = st.selectbox("Giọng đọc", ["Tiếng Việt (vi)", "English (en)", "Korean (ko)", "Japanese (ja)"])
-        lang_code = lang_option.split("(")[1].replace(")", "") # Lấy mã 'vi', 'en'...
+    # Chọn giọng đọc (Các giọng xịn của Microsoft)
+    voice_options = {
+        "Tiếng Việt - Hoài My (Nữ - Nhẹ nhàng)": "vi-VN-HoaiMyNeural",
+        "Tiếng Việt - Nam Minh (Nam - Trầm ấm)": "vi-VN-NamMinhNeural",
+        "Tiếng Anh - Aria (Nữ)": "en-US-AriaNeural",
+        "Tiếng Anh - Christopher (Nam)": "en-US-ChristopherNeural"
+    }
     
-    with c2:
-        st.write("") # Căn chỉnh lề
-        st.write("") 
-        if st.button("🔊 Read Aloud (Đọc ngay)", use_container_width=True):
-            if text_content.strip():
+    selected_voice_label = st.selectbox("Chọn giọng đọc:", list(voice_options.keys()))
+    selected_voice_code = voice_options[selected_voice_label]
+
+    if st.button("🔊 Đọc Ngay (Neural Voice)", use_container_width=True):
+        if text_content.strip():
+            with st.spinner("Đang tạo giọng nói (Mất khoảng 2-3 giây)..."):
                 try:
-                    # Sử dụng gTTS để tạo file âm thanh
-                    tts = gTTS(text=text_content, lang=lang_code)
-                    
-                    # Lưu vào bộ nhớ đệm thay vì lưu file cứng
-                    sound_file = io.BytesIO()
-                    tts.write_to_fp(sound_file)
+                    # Chạy hàm bất đồng bộ (async)
+                    audio_file_path = asyncio.run(text_to_speech_edge(text_content, selected_voice_code))
                     
                     # Phát âm thanh
-                    st.audio(sound_file, format='audio/mp3')
+                    st.audio(audio_file_path, format='audio/mp3')
+                    st.success("Đã tạo xong!")
                 except Exception as e:
-                    st.error(f"Lỗi tạo giọng nói: {e}")
-            else:
-                st.warning("Chưa có nội dung để đọc!")
+                    st.error(f"Lỗi giọng nói: {e}")
+        else:
+            st.warning("Chưa có nội dung để đọc!")
